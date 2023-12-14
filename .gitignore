@@ -17,6 +17,7 @@ __pycache__/
 *.json
 
 # Model files
+*.html
 *.pkl
 *.onnx
 *.bst
