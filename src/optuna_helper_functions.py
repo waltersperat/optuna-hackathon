@@ -17,6 +17,17 @@ Ts = TypeVarTuple("Ts")
 
 
 def get_top_n_percent_trials(study: Study, percentage: int = 10) -> list[Trial]:
+    """
+    This function takes a study and returns the top `percentage` of trials
+    depending on their value.
+
+    Args:
+        study (Study): The study to search.
+        percentage (int, optional): The top percentage to select. Defaults to 10.
+
+    Returns:
+        list[Trial]: The list of the top-percentage trials.
+    """
     is_maximization = study.direction == StudyDirection.MAXIMIZE
     sorted_trials = sorted(
         study.trials, key=lambda trial: trial.value, reverse=is_maximization
@@ -29,6 +40,17 @@ def get_top_n_percent_trials(study: Study, percentage: int = 10) -> list[Trial]:
 
 
 def suggest_imputer_params(trial: Trial, categorical: bool = False) -> dict[str, Any]:
+    """
+    This function generates the parameters in an optuna trial for a simple imputer.
+
+    Args:
+        trial (Trial): The current trial.
+        categorical (bool, optional): Whether the imputer is for categorical data.
+        Defaults to False.
+
+    Returns:
+        dict[str, Any]: The parameters for the SimpleImputer.
+    """
     if not categorical:
         strategy = trial.suggest_categorical(
             "numerical_strategy", ["mean", "median", "most_frequent", "constant"]
@@ -52,6 +74,15 @@ def suggest_imputer_params(trial: Trial, categorical: bool = False) -> dict[str,
 
 
 def suggest_ohe_params(trial: Trial) -> dict[str, Any]:
+    """
+    This function generates the parameters in an optuna trial for a one hot encoder.
+
+    Args:
+        trial (Trial): The current trial.
+
+    Returns:
+        dict[str, Any]: The parameters for the OneHotEncoder.
+    """
     params = {
         "drop": trial.suggest_categorical("drop", [None, "first", "if_binary"]),
         "handle_unknown": trial.suggest_categorical(
@@ -64,6 +95,16 @@ def suggest_ohe_params(trial: Trial) -> dict[str, Any]:
 
 
 def suggest_woe_params(trial: Trial) -> dict[str, Any]:
+    """
+    This function generates the parameters in an optuna trial for a weight of
+    evidence encoder.
+
+    Args:
+        trial (Trial): The current trial.
+
+    Returns:
+        dict[str, Any]: The parameters for the WOEEncoder.
+    """
     params = {
         "randomized": trial.suggest_categorical("randomized", [True, False]),
         "sigma": trial.suggest_float("sigma", 0.01, 10),
@@ -76,8 +117,19 @@ def suggest_woe_params(trial: Trial) -> dict[str, Any]:
 
 
 def get_processor(
-    trial: Trial, numerical_columns: list[str], categorical_columns: list[str]
+    trial: Trial, numerical_columns: Sequence[str], categorical_columns: Sequence[str]
 ) -> ColumnTransformer:
+    """
+    This function instantiates a processor in an optuna trial.
+
+    Args:
+        trial (Trial): The current trial.
+        numerical_columns (Sequence[str]): An iterable containing the names of the numerical columns.
+        categorical_columns (Sequence[str]): An iterable containing the names of the categorical columns.
+
+    Returns:
+        dict[str, Any]: An instantiated ColumnTransformer.
+    """
     impute = trial.suggest_categorical("impute", [True, False])
     if impute:
         numerical_imputer = SimpleImputer(**suggest_imputer_params(trial))
@@ -120,6 +172,15 @@ def get_processor(
 
 
 def suggest_lgbm_params(trial: Trial) -> dict[str, Any]:
+    """
+    This function generates the parameters in an optuna trial for a lightgbm model.
+
+    Args:
+        trial (Trial): The current trial.
+
+    Returns:
+        dict[str, Any]: The parameters for the lightgbm model.
+    """
     params = {
         "n_estimators": trial.suggest_int("n_estimators", 100, 1500),
         "max_depth": trial.suggest_int("max_depth", 1, 30),
@@ -143,6 +204,22 @@ def get_lgbm_classifier(
     suggest_function: Callable[[Trial], LGBMClassifier] = suggest_lgbm_params,
     previous_params: Optional[dict[str, Any]] = None,
 ) -> Pipeline:
+    """
+    This function instantiates a processor and model in an optuna trial and
+    returns them as a Pipeline object.
+
+    Args:
+        trial (Trial): The current trial.
+        numerical_columns (Sequence[str]): An iterable containing the names of the numerical columns.
+        categorical_columns (Sequence[str]): An iterable containing the names of the categorical columns.
+        suggest_function (Callable[[Trial], LGBMClassifier], optional): A function that suggests the
+        lightgbm model's parameters. Defaults to suggest_lgbm_params.
+        previous_params (Optional[dict[str, Any]], optional): The parameters of the previous steps in a
+        stepwise optimization. Defaults to None.
+
+    Returns:
+        dict[str, Any]: An instantiated ColumnTransformer.
+    """
     processor = get_processor(trial, numerical_columns, categorical_columns)
     
     if previous_params is not None:
@@ -159,6 +236,16 @@ def get_lgbm_classifier(
 
 
 def suggest_lgbm_step_one(trial: Trial) -> dict[str, Any]:
+    """
+    This function generates the parameters in an optuna trial for a lightgbm model
+    for the first step in a stepwise optimization. The tuned parameter is `colsample_bytree`.
+
+    Args:
+        trial (Trial): The current trial.
+
+    Returns:
+        dict[str, Any]: The parameters for the lightgbm model.
+    """
     params = {
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.05, 1),
         "verbose": -1,
@@ -170,6 +257,17 @@ def suggest_lgbm_step_one(trial: Trial) -> dict[str, Any]:
 def suggest_lgbm_step_two(
     trial: Trial, previous_params: dict[str, Any]
 ) -> dict[str, Any]:
+    """
+    This function generates the parameters in an optuna trial for a lightgbm model
+    for the second step in a stepwise optimization. The tuned parameter is `num_leaves`.
+
+    Args:
+        trial (Trial): The current trial.
+        previous_params (dict[str, Any]): The parameters found in the previous optimization step.
+
+    Returns:
+        dict[str, Any]: The parameters for the lightgbm model.
+    """
     params = previous_params | {
         "num_leaves": trial.suggest_int("num_leaves", 3, 63),
     }
@@ -179,6 +277,17 @@ def suggest_lgbm_step_two(
 def suggest_lgbm_step_three(
     trial: Trial, previous_params: dict[str, Any]
 ) -> dict[str, Any]:
+    """
+    This function generates the parameters in an optuna trial for a lightgbm model
+    for the third step in a stepwise optimization. The tuned parameter is `subsample`.
+
+    Args:
+        trial (Trial): The current trial.
+        previous_params (dict[str, Any]): The parameters found in the previous optimization step.
+
+    Returns:
+        dict[str, Any]: The parameters for the lightgbm model.
+    """
     params = previous_params | {
         "subsample": trial.suggest_float("subsample", 0.1, 1),
     }
@@ -188,6 +297,18 @@ def suggest_lgbm_step_three(
 def suggest_lgbm_step_four(
     trial: Trial, previous_params: dict[str, Any]
 ) -> dict[str, Any]:
+    """
+    This function generates the parameters in an optuna trial for a lightgbm model
+    for the second step in a stepwise optimization. The tuned parameters are `reg_alpha`
+    and `reg_lambda`.
+
+    Args:
+        trial (Trial): The current trial.
+        previous_params (dict[str, Any]): The parameters found in the previous optimization step.
+
+    Returns:
+        dict[str, Any]: The parameters for the lightgbm model.
+    """
     params = previous_params | {
         "reg_lambda": trial.suggest_float("reg_lambda", 0, 20),
         "reg_lambda": trial.suggest_float("reg_lambda", 0, 20),
@@ -195,6 +316,16 @@ def suggest_lgbm_step_four(
     return params
 
 def get_previous_params(studies : Sequence[Study], objectives: Sequence[Callable[[Trial], float]]) -> Optional[dict[str, Any]]:
+    """
+    This function takes an iterable of studies and objective funcitons and returns the parameters found in each of them.
+
+    Args:
+        studies (Sequence[Study]): The studies to extract the information from.
+        objectives (Sequence[Callable[[Trial], float]]): The objective function for each study.
+
+    Returns:
+        Optional[dict[str, Any]]: The parameters for the previous models.
+    """
     missing_steps = len(studies)
     if missing_steps==0:
         previous_model_params = None
@@ -219,6 +350,17 @@ class StepwiseStudy:
         samplers: BaseSampler | Sequence[BaseSampler] = TPESampler(),
         direction: str = "maximize",
     ) -> None:
+        """
+        The StepwiseStudy is a wrapper around optuna functionality that allows the running of sequential
+        optimization steps.
+
+        Args:
+            n_steps (int): The amount of optimization steps to perform.
+            storage (str): The storage to use (opuna storage database).
+            study_name (str, optional): The name of the study. Defaults to "study".
+            samplers (BaseSampler | Sequence[BaseSampler], optional): The samplers to use at each step. Defaults to TPESampler().
+            direction (str, optional): The direction of the optimization. Defaults to "maximize".
+        """
         self.n_steps = n_steps
         self.study_name = study_name
         self.direction = direction
@@ -250,6 +392,15 @@ class StepwiseStudy:
         n_trials: int | Sequence[int] = 100,
         all_trials: bool = False,
     ) -> None:
+        """
+        This function runs the optimize method on each of the provided studies.
+
+        Args:
+            objectives (Sequence[Callable[[Trial,): The objective functions to use for each study.
+            n_trials (int | Sequence[int], optional): The amount of trials to run for each study. Defaults to 100.
+            all_trials (bool, optional): Whether to store the outputs of all the steps or only the last
+            one. Defaults to False.
+        """
         n_trials_ = (
             n_trials
             if isinstance(n_trials, Sequence)
