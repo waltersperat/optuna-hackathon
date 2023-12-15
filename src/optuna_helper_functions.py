@@ -218,7 +218,7 @@ def get_lgbm_classifier(
         stepwise optimization. Defaults to None.
 
     Returns:
-        dict[str, Any]: An instantiated ColumnTransformer.
+        dict[str, Any]: An instantiated Pipeline.
     """
     processor = get_processor(trial, numerical_columns, categorical_columns)
     
@@ -310,7 +310,7 @@ def suggest_lgbm_step_four(
         dict[str, Any]: The parameters for the lightgbm model.
     """
     params = previous_params | {
-        "reg_lambda": trial.suggest_float("reg_lambda", 0, 20),
+        "reg_alpha": trial.suggest_float("reg_alpha", 0, 20),
         "reg_lambda": trial.suggest_float("reg_lambda", 0, 20),
     }
     return params

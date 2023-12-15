@@ -110,11 +110,11 @@ if __name__ == "__main__":
         storage="sqlite:///results/stepwise_optimization.db",
         study_name="stepwise_optimization",
         samplers=sampler,
-        direction="maximize",
+        direction="minimize",
         n_steps=4
     )
 
-    study.optimize(objectives, n_trials=10)
+    study.optimize(objectives, n_trials=30)
 
     best_10_percent_trials = get_top_n_percent_trials(study, percentage=10)
     best_10_percent_models = [

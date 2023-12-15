@@ -70,10 +70,10 @@ if __name__ == "__main__":
         storage="sqlite:///results/optimization.db",
         study_name="basic_optimization",
         sampler=sampler,
-        direction="maximize",
+        direction="minimize",
     )
 
-    study.optimize(basic_objective, n_trials=10)
+    study.optimize(basic_objective, n_trials=30)
 
     best_10_percent_trials = get_top_n_percent_trials(study, percentage=10)
     best_10_percent_models = [
@@ -86,6 +86,7 @@ if __name__ == "__main__":
     get_performance = partial(
         get_model_performance, X=X_test, y=y_test, function=brier_score_loss
     )
+    
     best_model = get_function_max(best_10_percent_models, get_performance)
 
     with open(os.path.join(RESULTS_FOLDER, "optimized.pkl"), "wb") as f:
