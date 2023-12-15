@@ -1,5 +1,5 @@
 from copy import deepcopy
-from functools import reduce
+from functools import partial, reduce
 from typing import Any, Callable, Optional, Sequence, TypeVarTuple
 from category_encoders import WOEEncoder
 from lightgbm import LGBMClassifier
@@ -10,6 +10,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+
+from src.utils import get_categorical_columns, get_numerical_columns
 
 Ts = TypeVarTuple("Ts")
 
@@ -142,18 +144,24 @@ def get_lgbm_classifier(
     previous_params: Optional[dict[str, Any]] = None,
 ) -> Pipeline:
     processor = get_processor(trial, numerical_columns, categorical_columns)
+    
+    if previous_params is not None:
+        previous_lgbm_params = {key: value for key, value in previous_params.items() if 'lgbm' in key}
+    
     params = (
         suggest_function(trial)
         if previous_params is None
-        else suggest_function(**previous_params)
+        else suggest_function(trial, previous_lgbm_params)
     )
+
     model = Pipeline([("processor", processor), ("model", LGBMClassifier(**params))])
     return model
 
 
 def suggest_lgbm_step_one(trial: Trial) -> dict[str, Any]:
     params = {
-        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.1, 1),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.05, 1),
+        "verbose": -1,
         "random_state": 42,
     }
     return params
@@ -162,30 +170,45 @@ def suggest_lgbm_step_one(trial: Trial) -> dict[str, Any]:
 def suggest_lgbm_step_two(
     trial: Trial, previous_params: dict[str, Any]
 ) -> dict[str, Any]:
-    params = {
-        "num_leaves": trial.suggest_float("num_leaves", 3, 63),
-    } | previous_params
+    params = previous_params | {
+        "num_leaves": trial.suggest_int("num_leaves", 3, 63),
+    }
     return params
 
 
 def suggest_lgbm_step_three(
     trial: Trial, previous_params: dict[str, Any]
 ) -> dict[str, Any]:
-    params = {
+    params = previous_params | {
         "subsample": trial.suggest_float("subsample", 0.1, 1),
-    } | previous_params
+    }
     return params
 
 
 def suggest_lgbm_step_four(
     trial: Trial, previous_params: dict[str, Any]
 ) -> dict[str, Any]:
-    params = {
+    params = previous_params | {
         "reg_lambda": trial.suggest_float("reg_lambda", 0, 20),
         "reg_lambda": trial.suggest_float("reg_lambda", 0, 20),
-    } | previous_params
+    }
     return params
 
+def get_previous_params(studies : Sequence[Study], objectives: Sequence[Callable[[Trial], float]]) -> Optional[dict[str, Any]]:
+    missing_steps = len(studies)
+    if missing_steps==0:
+        previous_model_params = None
+    else:
+        best_trial = studies[-1].best_trial
+        instantiation_params = {key: value for key, value in objectives[-1].keywords.items()}
+        numerical_columns = get_numerical_columns(instantiation_params.get('X'))
+        categorical_columns = get_categorical_columns(instantiation_params.get('X'))
+        suggest = (
+            partial(instantiation_params.get('suggest_function'), previous_params=get_previous_params(studies[:missing_steps-1], objectives[:missing_steps-1]))
+            if len(studies)>1 else instantiation_params.get('suggest_function')
+        )
+        previous_model_params = get_lgbm_classifier(best_trial, numerical_columns, categorical_columns, suggest)[-1].get_params()
+    return previous_model_params
 
 class StepwiseStudy:
     def __init__(
@@ -202,7 +225,7 @@ class StepwiseStudy:
         self.samplers = (
             samplers
             if isinstance(samplers, Sequence)
-            else [*map(lambda sampler: deepcopy(sampler), range(n_steps))]
+            else [*map(lambda _: deepcopy(samplers), range(n_steps))]
         )
 
         study_names = map(
@@ -216,7 +239,8 @@ class StepwiseStudy:
                     study_name=name,
                     direction=direction,
                 ),
-                zip(samplers, study_names),
+                self.samplers,
+                study_names,
             )
         ]
 
@@ -229,12 +253,17 @@ class StepwiseStudy:
         n_trials_ = (
             n_trials
             if isinstance(n_trials, Sequence)
-            else [*map(lambda: n_trials, range(self.n_steps))]
+            else [*map(lambda _: n_trials, range(self.n_steps))]
         )
 
         best_params = []
-        for study, objective, n in zip(self.studies, objectives, n_trials_):
-            study.optimize(objective, n)
+        for step, (study, objective, trials) in enumerate(zip(self.studies, objectives, n_trials_)):
+            if step==0:
+                study.optimize(objective, trials)
+            else:
+                previous_model_params = get_previous_params(self.studies[:step], objectives[:step])
+                study.optimize(partial(objective, previous_params=previous_model_params), trials)
+            
             best_params.append(study.best_params)
 
         self.best_step_params = [*map(lambda study: study.best_params, self.studies)]

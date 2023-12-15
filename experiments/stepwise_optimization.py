@@ -2,9 +2,11 @@ from functools import partial
 import os
 import numpy as np
 import pickle as pkl
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Optional, Sequence
+import warnings
+warnings.filterwarnings('ignore')
 
-from optuna import Trial, create_study
+from optuna import Trial
 from optuna.samplers import TPESampler
 import pandas as pd
 from sklearn.metrics import brier_score_loss, make_scorer
@@ -32,97 +34,23 @@ DATA_FOLDER = os.path.join("data", "raw_data")
 RESULTS_FOLDER = os.path.join("results", "stepwise_optimization")
 
 
-def step_one_objective(
+def step_objective(
     trial: Trial,
     X: pd.DataFrame,
     y: np.ndarray,
+    suggest_function: Callable[[Trial], dict[str, Any]],
     aggregation: Callable[[np.ndarray, np.ndarray], float],
+    previous_params: Optional[dict[str, Any]]=None,
 ) -> float:
     numerical_columns = get_numerical_columns(X)
     categorical_columns = get_categorical_columns(X)
+
     model = get_lgbm_classifier(
         trial,
         numerical_columns,
         categorical_columns,
-        suggest_function=suggest_lgbm_step_one,
-    )
-
-    scores = cross_val_score(
-        model,
-        X,
-        y,
-        scoring=make_scorer(brier_score_loss, needs_proba=True),
-        cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
-    )
-
-    return aggregation(scores)
-
-
-def step_two_objective(
-    trial: Trial,
-    X: pd.DataFrame,
-    y: np.ndarray,
-    aggregation: Callable[[np.ndarray, np.ndarray], float],
-) -> float:
-    numerical_columns = get_numerical_columns(X)
-    categorical_columns = get_categorical_columns(X)
-    model = get_lgbm_classifier(
-        trial,
-        numerical_columns,
-        categorical_columns,
-        suggest_function=suggest_lgbm_step_two,
-    )
-
-    scores = cross_val_score(
-        model,
-        X,
-        y,
-        scoring=make_scorer(brier_score_loss, needs_proba=True),
-        cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
-    )
-
-    return aggregation(scores)
-
-
-def step_three_objective(
-    trial: Trial,
-    X: pd.DataFrame,
-    y: np.ndarray,
-    aggregation: Callable[[np.ndarray, np.ndarray], float],
-) -> float:
-    numerical_columns = get_numerical_columns(X)
-    categorical_columns = get_categorical_columns(X)
-    model = get_lgbm_classifier(
-        trial,
-        numerical_columns,
-        categorical_columns,
-        suggest_function=suggest_lgbm_step_three,
-    )
-
-    scores = cross_val_score(
-        model,
-        X,
-        y,
-        scoring=make_scorer(brier_score_loss, needs_proba=True),
-        cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
-    )
-
-    return aggregation(scores)
-
-
-def step_four_objective(
-    trial: Trial,
-    X: pd.DataFrame,
-    y: np.ndarray,
-    aggregation: Callable[[np.ndarray, np.ndarray], float],
-) -> float:
-    numerical_columns = get_numerical_columns(X)
-    categorical_columns = get_categorical_columns(X)
-    model = get_lgbm_classifier(
-        trial,
-        numerical_columns,
-        categorical_columns,
-        suggest_function=suggest_lgbm_step_four,
+        suggest_function=suggest_function,
+        previous_params=previous_params
     )
 
     scores = cross_val_score(
@@ -166,23 +94,24 @@ if __name__ == "__main__":
     )
     X_test, X_val, y_test, y_val = train_test_split(X_test, y_test, shuffle=False)
 
-    objectives = map(
-        lambda objective: partial(objective, X=X_train, y=y_train, aggregation=np.max),
+    objectives = [*map(
+        lambda suggest: partial(step_objective, X=X_train, y=y_train, suggest_function=suggest, aggregation=np.max),
         [
-            step_one_objective,
-            step_two_objective,
-            step_three_objective,
-            step_four_objective,
+            suggest_lgbm_step_one,
+            suggest_lgbm_step_two,
+            suggest_lgbm_step_three,
+            suggest_lgbm_step_four,
         ],
-    )
+    )]
 
     sampler = TPESampler(n_startup_trials=10, seed=42)
 
     study = StepwiseStudy(
-        storage="sqlite:///results/optimization.db",
+        storage="sqlite:///results/stepwise_optimization.db",
         study_name="stepwise_optimization",
-        sampler=sampler,
+        samplers=sampler,
         direction="maximize",
+        n_steps=4
     )
 
     study.optimize(objectives, n_trials=10)
@@ -190,7 +119,12 @@ if __name__ == "__main__":
     best_10_percent_trials = get_top_n_percent_trials(study, percentage=10)
     best_10_percent_models = [
         *map(
-            lambda trial: instantiate_model(trial).fit(X_train, y_train),
+            lambda trial: instantiate_model(
+                trial,
+                params=study.best_params,
+                numerical_columns=numerical_columns,
+                categorical_columns=categorical_columns
+            ).fit(X_train, y_train),
             best_10_percent_trials,
         )
     ]
